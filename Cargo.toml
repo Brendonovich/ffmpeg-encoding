@@ -1,0 +1,8 @@
+[package]
+name = "ffmpeg-encoding"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ffmpeg-next = { git = "https://github.com/CapSoftware/rust-ffmpeg", rev = "11f8d264bbc0" }
+scap = { git = "https://github.com/CapSoftware/scap", rev = "691bd88798d3" }
