@@ -111,6 +111,10 @@ fn main() {
             den: fps as i32,
         };
         (*enc).time_base = (*st).time_base;
+        (*enc).framerate = AVRational {
+            num: fps as i32,
+            den: 1,
+        };
 
         (*enc).pix_fmt = AVPixelFormat::AV_PIX_FMT_YUV420P;
 
@@ -118,7 +122,12 @@ fn main() {
             (*enc).flags |= AV_CODEC_FLAG_GLOBAL_HEADER as i32;
         }
 
-        avcodec_open2(enc, codec, null_mut());
+        let mut opts = null_mut();
+        av_dict_set(&mut opts, c"preset".as_ptr(), c"ultrafast".as_ptr(), 0);
+        av_dict_set(&mut opts, c"tune".as_ptr(), c"zerolatency".as_ptr(), 0);
+        avcodec_open2(enc, codec, &mut opts);
+        let mut dict = ffmpeg_next::dictionary::Iter::new(opts);
+        dbg!(dict.next());
 
         let bgra_frame = av_frame_alloc();
         (*bgra_frame).format = source_format as i32;
