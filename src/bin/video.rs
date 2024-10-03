@@ -3,7 +3,8 @@ use std::{
     ptr::{null, null_mut},
 };
 
-use ffmpeg_next::ffi::*;
+use ffmpeg::ffi::*;
+use ffmpeg_next as ffmpeg;
 use scap::{
     capturer::{Capturer, Options},
     frame::Frame,
@@ -85,70 +86,63 @@ fn main() {
     let source_format = AVPixelFormat::AV_PIX_FMT_BGRA;
 
     unsafe {
-        let mut oc = null_mut();
-
+        let mut output = null_mut();
         let filename = c"output.mp4".as_ptr();
+        avformat_alloc_output_context2(&mut output, null(), null(), filename);
 
-        avformat_alloc_output_context2(&mut oc, null(), null(), filename);
+        let format = (*output).oformat;
 
-        let fmt = (*oc).oformat;
+        let codec = avcodec_find_encoder(AVCodecID::AV_CODEC_ID_H264);
 
-        let codec = avcodec_find_encoder_by_name(c"libx264".as_ptr());
+        let stream = avformat_new_stream(output, null());
+        (*stream).id = ((*output).nb_streams - 1) as i32;
 
-        let mut tmp_pkt = av_packet_alloc();
+        let mut encoder = avcodec_alloc_context3(codec);
 
-        let st = avformat_new_stream(oc, null());
-        (*st).id = ((*oc).nb_streams - 1) as i32;
+        (*encoder).codec_id = (*format).video_codec;
+        (*encoder).width = width as i32;
+        (*encoder).height = height as i32;
 
-        let mut enc = avcodec_alloc_context3(codec);
-
-        (*enc).codec_id = (*fmt).video_codec;
-        (*enc).width = width as i32;
-        (*enc).height = height as i32;
-
-        (*st).time_base = AVRational {
+        (*stream).time_base = AVRational {
             num: 1,
             den: fps as i32,
         };
-        (*enc).time_base = (*st).time_base;
-        (*enc).framerate = AVRational {
+        (*encoder).time_base = (*stream).time_base;
+        (*encoder).framerate = AVRational {
             num: fps as i32,
             den: 1,
         };
 
-        (*enc).pix_fmt = AVPixelFormat::AV_PIX_FMT_YUV420P;
+        (*encoder).pix_fmt = AVPixelFormat::AV_PIX_FMT_YUV420P;
 
-        if (*(*oc).oformat).flags & AVFMT_GLOBALHEADER == 1 {
-            (*enc).flags |= AV_CODEC_FLAG_GLOBAL_HEADER as i32;
+        if (*format).flags & AVFMT_GLOBALHEADER == 1 {
+            (*encoder).flags |= AV_CODEC_FLAG_GLOBAL_HEADER as i32;
         }
 
         let mut opts = null_mut();
         av_dict_set(&mut opts, c"preset".as_ptr(), c"ultrafast".as_ptr(), 0);
         av_dict_set(&mut opts, c"tune".as_ptr(), c"zerolatency".as_ptr(), 0);
-        avcodec_open2(enc, codec, &mut opts);
-        let mut dict = ffmpeg_next::dictionary::Iter::new(opts);
-        dbg!(dict.next());
+        avcodec_open2(encoder, codec, &mut opts);
 
         let bgra_frame = av_frame_alloc();
         (*bgra_frame).format = source_format as i32;
-        (*bgra_frame).width = (*enc).width;
-        (*bgra_frame).height = (*enc).height;
+        (*bgra_frame).width = (*encoder).width;
+        (*bgra_frame).height = (*encoder).height;
         av_frame_get_buffer(bgra_frame, 0);
 
         let mut enc_frame = av_frame_alloc();
-        (*enc_frame).format = (*enc).pix_fmt as i32;
-        (*enc_frame).width = (*enc).width;
-        (*enc_frame).height = (*enc).height;
-
+        (*enc_frame).format = (*encoder).pix_fmt as i32;
+        (*enc_frame).width = (*encoder).width;
+        (*enc_frame).height = (*encoder).height;
         av_frame_get_buffer(enc_frame, 0);
 
-        avcodec_parameters_from_context((*st).codecpar, enc);
+        avcodec_parameters_from_context((*stream).codecpar, encoder);
 
-        if !((*fmt).flags & AVFMT_NOFILE == 1) {
-            avio_open(&mut (*oc).pb, filename, AVIO_FLAG_WRITE);
+        if !((*format).flags & AVFMT_NOFILE == 1) {
+            avio_open(&mut (*output).pb, filename, AVIO_FLAG_WRITE);
         }
 
-        avformat_write_header(oc, null_mut());
+        avformat_write_header(output, null_mut());
 
         let sws_ctx = sws_getContext(
             width as i32,
@@ -156,12 +150,14 @@ fn main() {
             source_format,
             width as i32,
             height as i32,
-            (*enc).pix_fmt,
+            (*encoder).pix_fmt,
             SWS_BILINEAR,
             null_mut(),
             null_mut(),
             null(),
         );
+
+        let mut packet = av_packet_alloc();
 
         for (i, chunk) in buf
             .chunks_exact(width as usize * height as usize * 4)
@@ -183,48 +179,48 @@ fn main() {
 
             (*enc_frame).pts = i as i64;
 
-            write_frame(oc, enc, st, enc_frame, tmp_pkt);
+            write_frame(output, encoder, stream, enc_frame, packet);
         }
 
-        write_frame(oc, enc, st, null_mut(), tmp_pkt);
+        write_frame(output, encoder, stream, null_mut(), packet);
 
-        av_write_trailer(oc);
+        av_write_trailer(output);
 
-        if !((*fmt).flags & AVFMT_NOFILE == 1) {
-            avio_closep(&mut (*oc).pb);
+        if !((*format).flags & AVFMT_NOFILE == 1) {
+            avio_closep(&mut (*output).pb);
         }
 
-        avcodec_free_context(&mut enc);
+        avcodec_free_context(&mut encoder);
         av_frame_free(&mut enc_frame);
-        av_packet_free(&mut tmp_pkt);
+        av_packet_free(&mut packet);
 
-        avformat_free_context(oc);
+        avformat_free_context(output);
     }
 }
 
 unsafe fn write_frame(
-    fmt_ctx: *mut AVFormatContext,
-    enc_ctx: *mut AVCodecContext,
+    output: *mut AVFormatContext,
+    encoder: *mut AVCodecContext,
     stream: *mut AVStream,
     frame: *mut AVFrame,
-    pkt: *mut AVPacket,
+    packet: *mut AVPacket,
 ) {
-    avcodec_send_frame(enc_ctx, frame);
+    avcodec_send_frame(encoder, frame);
 
-    receive_and_write_packets(fmt_ctx, enc_ctx, stream, pkt)
+    receive_and_write_packets(output, encoder, stream, packet)
 }
 
 unsafe fn receive_and_write_packets(
-    fmt_ctx: *mut AVFormatContext,
-    enc_ctx: *mut AVCodecContext,
+    output: *mut AVFormatContext,
+    encoder: *mut AVCodecContext,
     stream: *mut AVStream,
-    pkt: *mut AVPacket,
+    packet: *mut AVPacket,
 ) {
-    while avcodec_receive_packet(enc_ctx, pkt) >= 0 {
-        av_packet_rescale_ts(pkt, (*enc_ctx).time_base, (*stream).time_base);
-        (*pkt).stream_index = (*stream).index;
+    while avcodec_receive_packet(encoder, packet) >= 0 {
+        av_packet_rescale_ts(packet, (*encoder).time_base, (*stream).time_base);
+        (*packet).stream_index = (*stream).index;
 
-        av_interleaved_write_frame(fmt_ctx, pkt);
-        av_packet_unref(pkt);
+        av_interleaved_write_frame(output, packet);
+        av_packet_unref(packet);
     }
 }
