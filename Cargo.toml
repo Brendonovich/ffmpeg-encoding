@@ -4,5 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ffmpeg-next = "7.1"
-scap = { git = "https://github.com/CapSoftware/scap", rev = "691bd88798d3" }
+anyhow = "1.0.94"
+cpal = "0.15.3"
+ffmpeg = { package = "ffmpeg-next", git = "https://github.com/CapSoftware/rust-ffmpeg", rev = "91b29d09a8c7cb4f5659c38f1f0924b980a30cba" }
+ffmpeg-sys = { package = "ffmpeg-sys-next", version = "7.1.0" }
+# scap = "0.0.6"
+scap = { path = "../../CapSoftware/scap" }
+cidre = { git = "https://github.com/yury/cidre", rev = "1e008bec49a0f97aeaaea6130a0ba20fe00aa03b" }
+tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
