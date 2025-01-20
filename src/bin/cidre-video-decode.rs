@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use cidre::{av, ns};
 
 const PATH: &str = r#"./assets/display.mp4"#;
@@ -30,9 +32,15 @@ async fn main() {
 
     reader.start_reading();
 
+    let now = Instant::now();
+
+    let mut i = 0;
+
     while let Ok(Some(sample_buf)) = reader_track_output.copy_next_sample_buf() {
-        // if let Some(image_buf) = sample_buf.image_buf() {
-        // dbg!(image_buf.color_space());
-        // }
+        if let Some(image_buf) = sample_buf.image_buf() {
+            i += 1;
+        }
     }
+
+    println!("decoded {i} frames in {:?}", now.elapsed());
 }

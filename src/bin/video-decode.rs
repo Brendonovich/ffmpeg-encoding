@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ffmpeg::{codec, format::Pixel};
 use ffmpeg_encoding::{CodecContextExt, HwDevice};
 use ffmpeg_sys::AVHWDeviceType;
@@ -64,15 +66,25 @@ fn main() -> anyhow::Result<()> {
 
     let mut frame = ffmpeg::frame::Video::empty();
 
+    let now = Instant::now();
+
+    let mut i = 0;
+
     for (stream, packet) in input_ctx.packets() {
         if stream.index() == input_stream_index {
             decoder.send_packet(&packet).unwrap();
 
-            while decoder.receive_frame(&mut frame).is_ok() {}
+            while decoder.receive_frame(&mut frame).is_ok() {
+                i += 1;
+            }
         }
     }
 
-    while decoder.receive_frame(&mut frame).is_ok() {}
+    while decoder.receive_frame(&mut frame).is_ok() {
+        i += 1;
+    }
+
+    println!("decoded {i} frames in {:?}", now.elapsed());
 
     Ok(())
 }
